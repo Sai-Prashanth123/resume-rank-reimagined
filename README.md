@@ -1,4 +1,89 @@
-# Welcome to your Lovable project
+# Resume Rank Reimagined
+
+This application helps you to analyze job descriptions and match resumes against them.
+
+## Features
+
+- Job description analysis using GPT-4o API
+- Automatic extraction of job requirements and skills
+- Resume matching against analyzed job descriptions
+
+## Setup
+
+### Frontend (React)
+
+1. Install the frontend dependencies:
+
+```bash
+npm install
+```
+
+2. Start the frontend development server:
+
+```bash
+npm run dev
+```
+
+### Backend (Python FastAPI)
+
+1. Install Python dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+2. Start the Python API server:
+
+```bash
+npm run start-api
+```
+
+Alternatively, you can start it directly:
+
+```bash
+python src/services/jobDescriptionAnalyzer.py
+```
+
+### Azure OpenAI Configuration
+
+The Python backend is configured to use Azure OpenAI. You may need to update the credentials in `src/services/jobDescriptionAnalyzer.py`:
+
+```python
+# Azure OpenAI configuration
+openai.api_type = "azure"
+openai.api_base = "YOUR_ENDPOINT"
+openai.api_version = "2024-02-15-preview"
+openai.api_key = "YOUR_API_KEY"
+deployment_name = "YOUR_DEPLOYMENT_NAME"
+```
+
+## How to Use
+
+1. Enter a job title and paste a job description
+2. Click "Analyze Description" to extract key requirements
+3. Review the analyzed sections and requirements
+4. Click "Use This Analysis" to proceed with resume matching
+
+## Technologies Used
+
+- Frontend: React, TypeScript, Vite, shadcn/ui
+- Backend: Python, FastAPI
+- AI: Azure OpenAI GPT-4o
+
+## Starting Both Frontend and Backend
+
+For convenience, use the provided scripts:
+
+### Windows:
+```bash
+start.bat
+```
+
+### Mac/Linux:
+```bash
+chmod +x start.sh
+./start.sh
+```
 
 ## Project info
 

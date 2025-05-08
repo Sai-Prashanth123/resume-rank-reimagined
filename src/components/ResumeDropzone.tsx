@@ -1,10 +1,10 @@
-
 import React, { useState, useCallback } from "react";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Check, Loader, Upload, X, FolderOpen } from "lucide-react";
+import { Check, Loader, Upload, X, FolderOpen, FileText } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import { Resume } from "@/types/resume";
+import { parseResumeFile } from "@/services/resumeAnalysis";
 
 interface ResumeDropzoneProps {
   onResumeUpload: (resumes: Resume[]) => void;
@@ -16,6 +16,7 @@ const ResumeDropzone: React.FC<ResumeDropzoneProps> = ({ onResumeUpload }) => {
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [processedCount, setProcessedCount] = useState(0);
+  const [processingFile, setProcessingFile] = useState<string | null>(null);
   const { toast } = useToast();
 
   const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
@@ -114,60 +115,150 @@ const ResumeDropzone: React.FC<ResumeDropzoneProps> = ({ onResumeUpload }) => {
   }, []);
 
   const processFiles = useCallback(async () => {
+    if (uploadedFiles.length === 0) {
+      toast({
+        title: "No files selected",
+        description: "Please select at least one resume file to analyze.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
     setIsUploading(true);
     setIsProcessing(true);
     setProcessedCount(0);
     
     try {
       const processedResumes: Resume[] = [];
+      const failedFiles: {name: string, error: string}[] = [];
       
-      // Process files one by one with a delay to simulate real-time processing
+      // Process files one by one
       for (let i = 0; i < uploadedFiles.length; i++) {
         const file = uploadedFiles[i];
+        setProcessingFile(file.name);
         
-        // Simulate file processing with a delay
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        
-        // Mock parsed resume data
-        const parsedResume: Resume = {
-          id: `resume-${Date.now()}-${i}`,
-          name: file.name.split('.')[0],
-          fileName: file.name,
-          uploadDate: new Date(),
-          content: `Mock content for ${file.name}. In a real application, this would contain the extracted text from the resume.`,
-        };
-        
-        processedResumes.push(parsedResume);
-        setProcessedCount(i + 1);
-        
-        // If this is the first resume or every 5th resume, send the batch for analysis
-        if (i === 0 || (i + 1) % 5 === 0 || i === uploadedFiles.length - 1) {
-          onResumeUpload([...processedResumes]);
+        // Parse the resume using our API
+        try {
+          const parsedResume = await parseResumeFile(file);
+          
+          // Check if there was an error returned from the API
+          if (parsedResume.error) {
+            const errorMsg = parsedResume.error;
+            console.error(`Error processing ${file.name}: ${errorMsg}`);
+            
+            // Add to failed files list
+            failedFiles.push({
+              name: file.name,
+              error: errorMsg
+            });
+            
+            // Create a fallback resume object
+            processedResumes.push({
+              id: `resume-${Date.now()}-${i}`,
+              name: file.name.split('.')[0],
+              fileName: file.name,
+              uploadDate: new Date(),
+              content: errorMsg.includes("startxref") 
+                ? `PDF parsing error: This file appears to be corrupted.` 
+                : `Failed to process ${file.name}. ${errorMsg}`,
+              file,
+              error: errorMsg
+            });
+            
+            // Show error toast for startxref errors specifically
+            if (errorMsg.includes("startxref")) {
+              toast({
+                title: "PDF Parsing Error",
+                description: `${file.name} could not be processed due to PDF corruption. The file has incorrect startxref pointers.`,
+                variant: "destructive",
+              });
+            }
+          } else {
+            // Add file reference for potential later processing
+            parsedResume.file = file;
+            processedResumes.push(parsedResume);
+          }
+        } catch (error) {
+          console.error(`Error processing file ${file.name}:`, error);
+          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          
+          failedFiles.push({
+            name: file.name,
+            error: errorMessage
+          });
+          
+          // Create a fallback resume object if parsing fails
+          processedResumes.push({
+            id: `resume-${Date.now()}-${i}`,
+            name: file.name.split('.')[0],
+            fileName: file.name,
+            uploadDate: new Date(),
+            content: `Failed to process ${file.name}. The file might be corrupted or password protected.`,
+            file,
+            error: errorMessage
+          });
         }
+        
+        setProcessedCount(i + 1);
       }
       
-      toast({
-        title: "Resumes uploaded successfully",
-        description: `${processedResumes.length} ${processedResumes.length === 1 ? 'resume' : 'resumes'} processed and ready for analysis.`,
-      });
+      // Only proceed if we have at least one successfully processed resume
+      if (processedResumes.length > 0) {
+        // Send all processed resumes at once
+        onResumeUpload(processedResumes);
+        
+        let toastMessage = `${processedResumes.length - failedFiles.length} of ${processedResumes.length} ${processedResumes.length === 1 ? 'resume' : 'resumes'} processed successfully`;
+        if (failedFiles.length > 0) {
+          toastMessage += `, ${failedFiles.length} ${failedFiles.length === 1 ? 'file' : 'files'} had issues`;
+        }
+        
+        toast({
+          title: failedFiles.length > 0 ? "Partial success" : "Resumes uploaded successfully",
+          description: toastMessage,
+          variant: failedFiles.length > 0 ? "default" : "default",
+        });
+        
+        // If there are multiple failed files, show a summary
+        if (failedFiles.length > 1) {
+          toast({
+            title: "Multiple files failed",
+            description: `${failedFiles.length} files could not be processed properly. Common issues include corrupted PDFs or password protection.`,
+            variant: "destructive",
+          });
+        }
+      } else {
+        toast({
+          title: "Upload failed",
+          description: "None of the selected files could be processed. They might be corrupted or password protected.",
+          variant: "destructive",
+        });
+      }
       
       // Clear the uploaded files
       setUploadedFiles([]);
+      setProcessingFile(null);
     } catch (error) {
+      console.error("Error processing resumes:", error);
       toast({
         title: "Upload failed",
-        description: "There was a problem uploading your resumes.",
+        description: "There was a problem processing your resumes.",
         variant: "destructive",
       });
     } finally {
       setIsUploading(false);
       setIsProcessing(false);
       setProcessedCount(0);
+      setProcessingFile(null);
     }
   }, [uploadedFiles, onResumeUpload, toast]);
 
   return (
     <Card className="shadow-lg border-resume-border">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-xl text-resume-text">
+          Upload Resumes
+        </CardTitle>
+      </CardHeader>
       <CardContent className="p-6">
         <div
           className={`resume-drop-area ${isDragging ? "active" : ""}`}
@@ -179,7 +270,6 @@ const ResumeDropzone: React.FC<ResumeDropzoneProps> = ({ onResumeUpload }) => {
             <div className="w-16 h-16 mb-4 rounded-full bg-resume-primary/10 flex items-center justify-center">
               <Upload className="h-8 w-8 text-resume-primary animate-bounce" />
             </div>
-            <h3 className="text-lg font-semibold mb-2">Upload Resumes</h3>
             <p className="text-sm text-muted-foreground mb-4">
               Drag & drop your resume files here, or select files/folder
             </p>
@@ -237,7 +327,7 @@ const ResumeDropzone: React.FC<ResumeDropzoneProps> = ({ onResumeUpload }) => {
                 >
                   <div className="flex items-center space-x-2">
                     <div className="w-8 h-8 rounded-full bg-resume-primary/10 flex items-center justify-center">
-                      <Check className="h-4 w-4 text-resume-primary" />
+                      <FileText className="h-4 w-4 text-resume-primary" />
                     </div>
                     <div className="overflow-hidden">
                       <p className="text-sm font-medium truncate">{file.name}</p>
@@ -249,7 +339,7 @@ const ResumeDropzone: React.FC<ResumeDropzoneProps> = ({ onResumeUpload }) => {
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="text-muted-foreground hover:text-destructive"
+                    className="h-8 w-8 rounded-full hover:bg-slate-200"
                     onClick={() => removeFile(index)}
                   >
                     <X className="h-4 w-4" />
@@ -257,48 +347,43 @@ const ResumeDropzone: React.FC<ResumeDropzoneProps> = ({ onResumeUpload }) => {
                 </div>
               ))}
               {uploadedFiles.length > 10 && (
-                <div className="text-center text-sm text-muted-foreground py-2">
-                  + {uploadedFiles.length - 10} more files
-                </div>
+                <p className="text-xs text-muted-foreground text-center">
+                  +{uploadedFiles.length - 10} more files selected
+                </p>
               )}
             </div>
 
-            <div className="flex justify-end mt-4">
-              <Button
-                onClick={processFiles}
-                disabled={isUploading}
-                className="bg-resume-primary hover:bg-resume-secondary text-white"
-              >
-                {isUploading ? (
-                  <div className="flex items-center gap-2">
-                    <Loader className="h-4 w-4 animate-spin" />
-                    Processing {processedCount}/{uploadedFiles.length}
+            <div className="mt-4 flex justify-end">
+              {isProcessing ? (
+                <div className="w-full">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm">
+                      Processing {processingFile ? `"${processingFile}"` : ''}...
+                    </span>
+                    <span className="text-sm font-medium">
+                      {processedCount}/{uploadedFiles.length}
+                    </span>
                   </div>
-                ) : (
-                  "Analyze Resumes"
-                )}
-              </Button>
+                  <div className="w-full bg-gray-200 rounded-full h-2">
+                    <div 
+                      className="bg-resume-primary h-2 rounded-full transition-all duration-300" 
+                      style={{ width: `${(processedCount / uploadedFiles.length) * 100}%` }}
+                    ></div>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Extracting and analyzing resume content...
+                  </p>
+                </div>
+              ) : (
+                <Button 
+                  className="bg-resume-primary hover:bg-resume-secondary text-white"
+                  onClick={processFiles}
+                  disabled={isUploading}
+                >
+                  Analyze {uploadedFiles.length} Resumes
+                </Button>
+              )}
             </div>
-          </div>
-        )}
-        
-        {isProcessing && (
-          <div className="mt-6 bg-resume-primary/5 rounded-lg p-4 animate-fade-in">
-            <div className="flex items-center gap-3 mb-2">
-              <Loader className="h-5 w-5 text-resume-primary animate-spin" />
-              <h4 className="text-sm font-medium">
-                Processing resumes in real-time
-              </h4>
-            </div>
-            <div className="w-full bg-gray-200 rounded-full h-2.5 mb-2">
-              <div 
-                className="bg-resume-primary h-2.5 rounded-full transition-all duration-500" 
-                style={{ width: `${(processedCount / uploadedFiles.length) * 100}%` }}
-              ></div>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {processedCount} of {uploadedFiles.length} resumes processed
-            </p>
           </div>
         )}
       </CardContent>

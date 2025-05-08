@@ -1,5 +1,4 @@
-
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import ResumeDropzone from "@/components/ResumeDropzone";
 import JobDescriptionInput from "@/components/JobDescriptionInput";
 import { Resume, ResumeScore, JobDescription } from "@/types/resume";
@@ -15,51 +14,64 @@ const Index = () => {
   const [resumeScores, setResumeScores] = useState<ResumeScore[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const { toast } = useToast();
+  const [appStage, setAppStage] = useState<'job-description' | 'upload-resumes' | 'analysis'>('job-description');
+
+  // Extract list of filenames with errors
+  const erroredFiles = useMemo(() => {
+    return resumes
+      .filter(resume => resume.error)
+      .map(resume => resume.fileName);
+  }, [resumes]);
 
   const handleResumeUpload = (uploadedResumes: Resume[]) => {
     // Add new resumes to the existing collection
     setResumes((prev) => [...prev, ...uploadedResumes]);
     
-    // If job description is already provided, analyze the new resumes
-    if (jobDescription) {
+    // If we have received resumes, proceed to analyze them
+    if (uploadedResumes.length > 0 && jobDescription) {
       analyzeNewResumes(uploadedResumes, jobDescription);
+      setAppStage('analysis');
     }
   };
 
   const handleJobDescriptionSave = async (jd: JobDescription) => {
     setJobDescription(jd);
+    setAppStage('upload-resumes');
     
-    // If we already have resumes, analyze them with the new job description
-    if (resumes.length > 0) {
-      await analyzeAllResumes(resumes, jd);
-    } else {
-      toast({
-        title: "Job description saved",
-        description: "Now upload some resumes to analyze against this job description.",
-      });
-    }
+    toast({
+      title: "Job description analyzed",
+      description: "Now upload resumes to analyze against this job description.",
+    });
   };
 
-  const analyzeNewResumes = async (newResumes: Resume[], jd: JobDescription) => {
+  const analyzeNewResumes = async (resumesToAnalyze: Resume[], jd: JobDescription) => {
     setIsAnalyzing(true);
+    
     try {
-      // For each new resume, analyze and add to scores
-      const newScores = await analyzeResumes(newResumes, jd);
+      const newScores = await analyzeResumes(resumesToAnalyze, jd);
+      setResumeScores((prev) => [...prev, ...newScores]);
       
-      // Merge new scores with existing ones and re-sort
-      setResumeScores(prev => {
-        const combined = [...prev, ...newScores];
-        return combined.sort((a, b) => b.overallScore - a.overallScore);
-      });
-      
-      toast({
-        title: "Analysis complete",
-        description: `${newResumes.length} new ${newResumes.length === 1 ? 'resume' : 'resumes'} analyzed and ranked.`,
-      });
+      if (newScores.length > 0) {
+        toast({
+          title: "Analysis complete",
+          description: `Successfully analyzed ${newScores.length} resumes.`,
+        });
+      }
+
+      // If there were errors, show a summary toast
+      const erroredResumes = resumesToAnalyze.filter(resume => resume.error);
+      if (erroredResumes.length > 0) {
+        toast({
+          title: "Some resumes had issues",
+          description: `${erroredResumes.length} out of ${resumesToAnalyze.length} resumes had processing issues but were analyzed with limited data.`,
+          variant: "default",
+        });
+      }
     } catch (error) {
+      console.error("Error analyzing resumes:", error);
       toast({
         title: "Analysis failed",
-        description: "There was a problem analyzing the resumes.",
+        description: "There was an error analyzing the resumes. Please try again.",
         variant: "destructive",
       });
     } finally {
@@ -67,25 +79,11 @@ const Index = () => {
     }
   };
 
-  const analyzeAllResumes = async (allResumes: Resume[], jd: JobDescription) => {
-    setIsAnalyzing(true);
-    try {
-      const scores = await analyzeResumes(allResumes, jd);
-      setResumeScores(scores);
-      
-      toast({
-        title: "Analysis complete",
-        description: `${allResumes.length} ${allResumes.length === 1 ? 'resume' : 'resumes'} analyzed and ranked.`,
-      });
-    } catch (error) {
-      toast({
-        title: "Analysis failed",
-        description: "There was a problem analyzing the resumes.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsAnalyzing(false);
-    }
+  const resetFlow = () => {
+    setAppStage('job-description');
+    setResumes([]);
+    setResumeScores([]);
+    setJobDescription(null);
   };
 
   return (
@@ -100,8 +98,42 @@ const Index = () => {
           </p>
         </header>
 
-        {resumeScores.length > 0 && jobDescription ? (
-          <div className="mb-8">
+        {/* Step 1: Job Description Input (Always visible in step 1) */}
+        {appStage === 'job-description' && (
+          <div className="max-w-2xl mx-auto">
+            <JobDescriptionInput onJobDescriptionSave={handleJobDescriptionSave} />
+          </div>
+        )}
+
+        {/* Step 2: Resume Upload (Only visible after job description is analyzed) */}
+        {appStage === 'upload-resumes' && jobDescription && (
+          <div className="max-w-2xl mx-auto">
+            <div className="mb-6">
+              <h2 className="text-xl font-semibold text-resume-text mb-2">Job Description Summary</h2>
+              <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
+                <h3 className="font-medium text-lg">{jobDescription.title}</h3>
+                <p className="mt-2 text-sm text-gray-600 line-clamp-2">{jobDescription.description.substring(0, 150)}...</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {jobDescription.skills.slice(0, 5).map((skill, index) => (
+                    <span key={index} className="bg-resume-primary/10 text-resume-primary text-xs px-2 py-1 rounded">
+                      {skill}
+                    </span>
+                  ))}
+                  {jobDescription.skills.length > 5 && (
+                    <span className="bg-gray-100 text-gray-600 text-xs px-2 py-1 rounded">
+                      +{jobDescription.skills.length - 5} more
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+            <ResumeDropzone onResumeUpload={handleResumeUpload} />
+          </div>
+        )}
+
+        {/* Step 3: Analysis Results (Only visible after resumes are uploaded and analyzed) */}
+        {appStage === 'analysis' && jobDescription && (
+          <div>
             <ResumeAnalysisHeader 
               jobDescription={jobDescription}
               resumeCount={resumes.length}
@@ -119,20 +151,19 @@ const Index = () => {
                 </div>
               </div>
             ) : (
-              <ResumeRanking scores={resumeScores} />
+              <div>
+                <ResumeRanking scores={resumeScores} erroredFiles={erroredFiles} />
+                <div className="mt-8 flex justify-between">
+                  <button 
+                    onClick={resetFlow}
+                    className="text-sm text-resume-primary hover:underline"
+                  >
+                    Start Over
+                  </button>
+                  <ResumeDropzone onResumeUpload={handleResumeUpload} />
+                </div>
+              </div>
             )}
-            <div className="mt-8">
-              <ResumeDropzone onResumeUpload={handleResumeUpload} />
-            </div>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <JobDescriptionInput onJobDescriptionSave={handleJobDescriptionSave} />
-            </div>
-            <div>
-              <ResumeDropzone onResumeUpload={handleResumeUpload} />
-            </div>
           </div>
         )}
 

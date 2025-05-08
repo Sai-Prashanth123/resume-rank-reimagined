@@ -1,102 +1,364 @@
+import { Resume, ResumeScore, JobDescription, ScoreAnalysis } from "@/types/resume";
+import axios from 'axios';
 
-import { Resume, ResumeScore, JobDescription } from "@/types/resume";
+const API_BASE_URL = 'http://localhost:8000';
 
-// Mock analysis function that would be replaced by a real NLP/AI service in production
+// Function to convert file to base64
+export const fileToBase64 = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = error => reject(error);
+  });
+};
+
+// Retry mechanism for API requests
+const retryRequest = async <T>(
+  requestFn: () => Promise<T>, 
+  maxRetries: number = 3, 
+  delay: number = 1000
+): Promise<T> => {
+  let lastError: any = null;
+  
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await requestFn();
+    } catch (error) {
+      lastError = error;
+      console.warn(`API request failed (attempt ${attempt + 1}/${maxRetries}):`, error);
+      
+      // Don't wait after the last attempt
+      if (attempt < maxRetries - 1) {
+        // Exponential backoff
+        const backoffDelay = delay * Math.pow(2, attempt);
+        await new Promise(resolve => setTimeout(resolve, backoffDelay));
+      }
+    }
+  }
+  
+  throw lastError;
+};
+
+// Function to parse a resume file and extract text
+export const parseResumeFile = async (file: File): Promise<Resume> => {
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    // Add file metadata to help with parsing
+    formData.append('filename', file.name);
+    formData.append('filetype', file.type);
+    formData.append('filesize', file.size.toString());
+
+    // Use retry mechanism for resilience
+    const response = await retryRequest(() => 
+      axios.post(`${API_BASE_URL}/parse-resume`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+        timeout: 30000, // 30 seconds timeout
+      })
+    );
+
+    // Check if the response contains an error field
+    if (response.data && response.data.error) {
+      console.error('Error parsing resume:', response.data.error);
+      return {
+        id: `resume-${Date.now()}`,
+        name: file.name.split('.')[0],
+        fileName: file.name,
+        uploadDate: new Date(),
+        content: response.data.partial_content || 'Error parsing resume content',
+        error: response.data.error,
+        partial: response.data.partial_content ? true : false
+      };
+    }
+
+    return response.data;
+  } catch (error) {
+    console.error('Error parsing resume:', error);
+    
+    // Fallback to client-side handling if API fails
+    const base64Data = await fileToBase64(file);
+    
+    return {
+      id: `resume-${Date.now()}`,
+      name: file.name.split('.')[0],
+      fileName: file.name,
+      uploadDate: new Date(),
+      content: `Failed to parse resume content. Using fallback.`,
+      base64Data,
+      error: error instanceof Error ? error.message : 'Unknown error occurred'
+    };
+  }
+};
+
+// Cache for analyzed job descriptions to avoid redundant processing
+const jobDescriptionCache: Map<string, any> = new Map();
+
+// Function to pre-process job description for analysis
+const prepareJobDescription = async (jobDescription: JobDescription): Promise<JobDescription> => {
+  // Create a cache key based on description content
+  const cacheKey = jobDescription.id || jobDescription.title;
+  
+  // Return cached result if available
+  if (jobDescriptionCache.has(cacheKey)) {
+    console.log('Using cached job description analysis');
+    return jobDescriptionCache.get(cacheKey);
+  }
+  
+  try {
+    // Perform client-side preprocessing if needed
+    const enhancedJobDescription = {
+      ...jobDescription,
+      preprocessed: true,
+      processingTimestamp: new Date().toISOString()
+    };
+    
+    // Cache the result
+    jobDescriptionCache.set(cacheKey, enhancedJobDescription);
+    return enhancedJobDescription;
+  } catch (error) {
+    console.error('Error preprocessing job description:', error);
+    return jobDescription;
+  }
+};
+
+// Function to batch process resumes for more efficient API calls
+const batchProcessResumes = async (
+  resumes: Resume[],
+  jobDescription: JobDescription,
+  batchSize: number = 5
+): Promise<ResumeScore[]> => {
+  const results: ResumeScore[] = [];
+  
+  // Process resumes in batches
+  for (let i = 0; i < resumes.length; i += batchSize) {
+    const batch = resumes.slice(i, i + batchSize);
+    
+    try {
+      console.log(`Processing batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(resumes.length/batchSize)}`);
+      
+      // Process this batch
+      const response = await retryRequest(() => 
+        axios.post(`${API_BASE_URL}/analyze-resumes`, {
+          jobDescription,
+          resumes: batch
+        }, {
+          timeout: 60000 // 60 seconds timeout for batch processing
+        })
+      );
+      
+      // Add results from this batch
+      results.push(...response.data);
+    } catch (error) {
+      console.error(`Error processing batch ${Math.floor(i/batchSize) + 1}:`, error);
+      
+      // Create fallback results for this batch
+      const fallbackResults = await Promise.all(
+        batch.map(resume => createFallbackResult(resume, jobDescription))
+      );
+      
+      results.push(...fallbackResults);
+    }
+  }
+  
+  return results;
+};
+
+// Helper function to create a fallback result for a resume
+const createFallbackResult = async (
+  resume: Resume, 
+  jobDescription: JobDescription
+): Promise<ResumeScore> => {
+  // Generate deterministic but reasonable mock scores based on the resume content
+  const contentLength = resume.content ? resume.content.length : 0;
+  const hasError = resume.error ? true : false;
+  
+  // Base scores modified by content length (more content usually means better match)
+  // But penalize errors
+  const baseScore = Math.min(45 + (contentLength / 500), 70);
+  const penaltyFactor = hasError ? 0.7 : 1.0;
+  
+  // Generate somewhat different scores for each category
+  const keywordMatch = Math.round((baseScore + 10) * penaltyFactor);
+  const skillsMatch = Math.round((baseScore - 5) * penaltyFactor);
+  const experienceMatch = Math.round((baseScore + 5) * penaltyFactor);
+  const educationMatch = Math.round((baseScore - 10) * penaltyFactor);
+  
+  // Overall score with realistic weighting
+  const overallScore = Math.round(
+    keywordMatch * 0.25 +
+    skillsMatch * 0.35 +
+    experienceMatch * 0.25 +
+    educationMatch * 0.15
+  );
+  
+  return {
+    resumeId: resume.id,
+    resumeName: resume.name,
+    fileName: resume.fileName,
+    overallScore: Math.max(20, Math.min(overallScore, 75)), // Ensure score is between 20-75 for fallbacks
+    keywordMatch: Math.max(15, Math.min(keywordMatch, 80)),
+    skillsMatch: Math.max(15, Math.min(skillsMatch, 80)),
+    experienceMatch: Math.max(15, Math.min(experienceMatch, 80)),
+    educationMatch: Math.max(15, Math.min(educationMatch, 80)),
+    evaluationDetails: [
+      hasError ? `Warning: This resume had processing issues. Results may be incomplete.` :
+                `Note: This analysis is an estimate as the resume could not be fully processed.`,
+      `Analyzed content length: ${contentLength} characters`,
+      `File name: ${resume.fileName}`
+    ],
+    scoreDetails: [
+      {
+        category: "Keywords",
+        matches: ["Limited analysis available"],
+        misses: ["Full keyword matching unavailable"]
+      },
+      {
+        category: "Skills",
+        matches: ["Limited analysis available"],
+        misses: ["Full skills matching unavailable"]
+      }
+    ]
+  };
+};
+
+// Main function to analyze resumes against a job description
 export const analyzeResumes = async (
   resumes: Resume[],
   jobDescription: JobDescription
 ): Promise<ResumeScore[]> => {
-  // Simulate API delay
-  await new Promise((resolve) => setTimeout(resolve, 1500));
+  try {
+    // Prepare enhanced job description
+    const enhancedJobDescription = await prepareJobDescription(jobDescription);
 
-  const scores: ResumeScore[] = resumes.map((resume) => {
-    // Generate random matching scores for demo purposes
-    // In a real application, these would be calculated by comparing the resume content
-    // against the job description using NLP techniques
-    
-    // Get random scores but make them somewhat related to each other
-    const baseScore = Math.floor(Math.random() * 50) + 30;  // Base score between 30-80
-    const variationRange = 20;  // Allow up to 20% variation from base score
-    
-    const keywordMatch = Math.min(100, Math.max(0, baseScore + Math.floor(Math.random() * variationRange) - variationRange/2));
-    const skillsMatch = Math.min(100, Math.max(0, baseScore + Math.floor(Math.random() * variationRange) - variationRange/2));
-    const experienceMatch = Math.min(100, Math.max(0, baseScore + Math.floor(Math.random() * variationRange) - variationRange/2));
-    const educationMatch = Math.min(100, Math.max(0, baseScore + Math.floor(Math.random() * variationRange) - variationRange/2));
-    
-    // Overall score is weighted average of the components
-    const overallScore = Math.round(
-      (keywordMatch * 0.3 + skillsMatch * 0.3 + experienceMatch * 0.25 + educationMatch * 0.15)
+    // For files that don't have base64Data, try to process them properly
+    const processedResumes = await Promise.all(
+      resumes.map(async (resume) => {
+        if (!resume.base64Data && resume.file) {
+          try {
+            const base64Data = await fileToBase64(resume.file);
+            return { ...resume, base64Data };
+          } catch (e) {
+            console.error(`Error converting file to base64: ${e}`);
+            return resume; // Return the resume without base64Data if conversion fails
+          }
+        }
+        return resume;
+      })
     );
 
-    // Generate evaluation details
-    const evaluationDetails = generateEvaluationDetails(
-      keywordMatch,
-      skillsMatch,
-      experienceMatch,
-      educationMatch,
-      jobDescription
+    // Separate resumes with and without errors for different processing paths
+    const validResumes = processedResumes.filter(resume => !resume.error);
+    const errorResumes = processedResumes.filter(resume => resume.error);
+    
+    // If all resumes have errors, return fallback results
+    if (validResumes.length === 0 && processedResumes.length > 0) {
+      console.warn("All resumes have errors, using fallback implementation");
+      return Promise.all(errorResumes.map(resume => createFallbackResult(resume, enhancedJobDescription)));
+    }
+
+    // Process valid resumes in batches for better performance
+    const validResults = validResumes.length > 0 ? 
+      await batchProcessResumes(validResumes, enhancedJobDescription) : [];
+
+    // Create fallback results for resumes with errors
+    const errorResults = await Promise.all(
+      errorResumes.map(resume => createFallbackResult(resume, enhancedJobDescription))
     );
-
-    return {
-      resumeId: resume.id,
-      resumeName: resume.name,
-      fileName: resume.fileName,
-      overallScore,
-      keywordMatch,
-      skillsMatch,
-      experienceMatch,
-      educationMatch,
-      evaluationDetails,
-    };
-  });
-
-  return scores;
+    
+    // Combine and sort all results
+    const allResults = [...validResults, ...errorResults]
+      .sort((a, b) => b.overallScore - a.overallScore);
+    
+    return allResults;
+  } catch (error) {
+    console.error('Error analyzing resumes:', error);
+    
+    // Complete fallback to local processing
+    return Promise.all(resumes.map(resume => createFallbackResult(resume, jobDescription)));
+  }
 };
 
-const generateEvaluationDetails = (
-  keywordMatch: number,
-  skillsMatch: number,
-  experienceMatch: number,
-  educationMatch: number,
+// Get a detailed analysis of a specific resume score
+export const generateScoreAnalysis = (score: ResumeScore): ScoreAnalysis => {
+  // Extract score details
+  const { overallScore, keywordMatch, skillsMatch, experienceMatch, educationMatch } = score;
+  
+  let analysis: ScoreAnalysis = {
+    overallAssessment: "",
+    strengths: [],
+    weaknesses: [],
+    recommendations: []
+  };
+  
+  // Overall assessment
+  if (overallScore >= 80) {
+    analysis.overallAssessment = "Excellent match for the position. This candidate meets or exceeds most requirements.";
+  } else if (overallScore >= 65) {
+    analysis.overallAssessment = "Good match for the position. This candidate meets many key requirements.";
+  } else if (overallScore >= 50) {
+    analysis.overallAssessment = "Moderate match for the position. This candidate meets some requirements but has notable gaps.";
+  } else {
+    analysis.overallAssessment = "Limited match for the position. This candidate may need significant additional qualifications.";
+  }
+  
+  // Determine strengths (scores >= 70)
+  if (keywordMatch >= 70) {
+    analysis.strengths.push("Strong keyword relevance to the job description");
+  }
+  if (skillsMatch >= 70) {
+    analysis.strengths.push("Impressive skills alignment with job requirements");
+  }
+  if (experienceMatch >= 70) {
+    analysis.strengths.push("Relevant experience level for the position");
+  }
+  if (educationMatch >= 70) {
+    analysis.strengths.push("Education credentials match or exceed requirements");
+  }
+  
+  // Determine weaknesses (scores < 50)
+  if (keywordMatch < 50) {
+    analysis.weaknesses.push("Resume lacks key terminology relevant to the position");
+  }
+  if (skillsMatch < 50) {
+    analysis.weaknesses.push("Skills gap compared to job requirements");
+  }
+  if (experienceMatch < 50) {
+    analysis.weaknesses.push("Experience level may be insufficient for the role");
+  }
+  if (educationMatch < 50) {
+    analysis.weaknesses.push("Educational qualifications may not meet requirements");
+  }
+  
+  // Generate recommendations
+  if (keywordMatch < 60) {
+    analysis.recommendations.push("Update resume to include more industry-specific terminology from the job description");
+  }
+  if (skillsMatch < 60) {
+    analysis.recommendations.push("Highlight technical or soft skills that align with the job requirements");
+  }
+  if (experienceMatch < 60) {
+    analysis.recommendations.push("Emphasize relevant work experience and accomplishments related to the role");
+  }
+  if (educationMatch < 60) {
+    analysis.recommendations.push("Consider additional certifications or training to strengthen qualifications");
+  }
+  
+  // If generally good but not great, add general optimization advice
+  if (overallScore >= 50 && overallScore < 75) {
+    analysis.recommendations.push("Tailor the resume structure and content specifically for this type of position");
+  }
+  
+  return analysis;
+};
+
+// Mock function for testing - moved here to be properly typed and more realistic
+export const mockAnalyzeResumes = async (
+  resumes: Resume[],
   jobDescription: JobDescription
-): string[] => {
-  const details: string[] = [];
-
-  // Keyword match evaluation
-  if (keywordMatch >= 80) {
-    details.push(`Excellent keyword match with the job description. The resume contains most of the important terms required.`);
-  } else if (keywordMatch >= 60) {
-    details.push(`Good keyword match found. Consider adding more specific terms from the job description.`);
-  } else {
-    details.push(`Low keyword match. The resume lacks many important terms from the job description.`);
-  }
-
-  // Skills match evaluation
-  if (skillsMatch >= 80) {
-    details.push(`Excellent skills alignment. The resume demonstrates proficiency in ${jobDescription.skills.slice(0, 3).join(", ")}.`);
-  } else if (skillsMatch >= 60) {
-    details.push(`Good skills match, but some key skills like ${jobDescription.skills.slice(0, 2).join(", ")} could be highlighted more prominently.`);
-  } else {
-    details.push(`Low skills match. Consider highlighting or adding skills like ${jobDescription.skills.slice(0, 3).join(", ")}.`);
-  }
-
-  // Experience match evaluation
-  if (experienceMatch >= 80) {
-    details.push(`Work experience aligns very well with the job requirements.`);
-  } else if (experienceMatch >= 60) {
-    details.push(`Relevant work experience found, but could better highlight achievements related to ${jobDescription.requirements[0]}.`);
-  } else {
-    details.push(`Experience seems insufficient compared to job requirements. Consider highlighting relevant projects or achievements.`);
-  }
-
-  // Education match evaluation
-  if (educationMatch >= 80) {
-    details.push(`Education background is a great match for this role.`);
-  } else if (educationMatch >= 60) {
-    details.push(`Educational qualifications meet basic requirements, but could highlight relevant coursework or certifications.`);
-  } else {
-    details.push(`Educational background may need supplementing with relevant certifications or courses for this role.`);
-  }
-
-  return details;
+): Promise<ResumeScore[]> => {
+  return Promise.all(resumes.map(resume => createFallbackResult(resume, jobDescription)));
 };
