@@ -107,7 +107,7 @@ const ScoreCard: React.FC<ScoreCardProps> = ({
             <Progress
               value={score.keywordMatch}
               className="progress-bar"
-              indicatorClassName="bg-resume-primary animate-progress-fill"
+              // Fixed: removed indicatorClassName
               style={{ "--progress-width": `${score.keywordMatch}%` } as React.CSSProperties}
             />
           </div>
@@ -122,7 +122,7 @@ const ScoreCard: React.FC<ScoreCardProps> = ({
             <Progress
               value={score.skillsMatch}
               className="progress-bar"
-              indicatorClassName="bg-resume-accent animate-progress-fill"
+              // Fixed: removed indicatorClassName
               style={{ "--progress-width": `${score.skillsMatch}%` } as React.CSSProperties}
             />
           </div>
@@ -139,7 +139,7 @@ const ScoreCard: React.FC<ScoreCardProps> = ({
             <Progress
               value={score.experienceMatch}
               className="progress-bar"
-              indicatorClassName="bg-resume-secondary animate-progress-fill"
+              // Fixed: removed indicatorClassName
               style={{ "--progress-width": `${score.experienceMatch}%` } as React.CSSProperties}
             />
           </div>
@@ -156,7 +156,7 @@ const ScoreCard: React.FC<ScoreCardProps> = ({
             <Progress
               value={score.educationMatch}
               className="progress-bar"
-              indicatorClassName="bg-resume-muted animate-progress-fill"
+              // Fixed: removed indicatorClassName
               style={{ "--progress-width": `${score.educationMatch}%` } as React.CSSProperties}
             />
           </div>

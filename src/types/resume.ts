@@ -25,3 +25,9 @@ export interface JobDescription {
   skills: string[];
   requirements: string[];
 }
+
+export interface ScoreAnalysis {
+  strengths: string[];
+  weaknesses: string[];
+  recommendations: string[];
+}

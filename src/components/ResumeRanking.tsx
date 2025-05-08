@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { ResumeScore } from "@/types/resume";
 import ScoreCard from "./ScoreCard";
+import ResumeDetailView from "./ResumeDetailView";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ArrowDown, ArrowUp } from "lucide-react";
@@ -14,6 +15,7 @@ const ResumeRanking: React.FC<ResumeRankingProps> = ({ scores }) => {
   const [sortedScores, setSortedScores] = useState<ResumeScore[]>([]);
   const [previousRanks, setPreviousRanks] = useState<Record<string, number>>({});
   const [sortAscending, setSortAscending] = useState(false);
+  const [selectedResumeId, setSelectedResumeId] = useState<string | null>(null);
 
   // Set up the initial sorting (descending by default)
   useEffect(() => {
@@ -48,7 +50,23 @@ const ResumeRanking: React.FC<ResumeRankingProps> = ({ scores }) => {
     setSortAscending(prev => !prev);
   }, [sortedScores]);
 
+  const handleCardClick = useCallback((resumeId: string) => {
+    setSelectedResumeId(resumeId);
+  }, []);
+
+  const handleBackClick = useCallback(() => {
+    setSelectedResumeId(null);
+  }, []);
+
   if (scores.length === 0) return null;
+  
+  // Show detailed view if a resume is selected
+  if (selectedResumeId) {
+    const selectedResume = sortedScores.find(score => score.resumeId === selectedResumeId);
+    if (selectedResume) {
+      return <ResumeDetailView score={selectedResume} onBack={handleBackClick} />;
+    }
+  }
 
   return (
     <Card className="shadow-lg border-resume-border">
@@ -76,12 +94,17 @@ const ResumeRanking: React.FC<ResumeRankingProps> = ({ scores }) => {
       <CardContent>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {sortedScores.map((score, index) => (
-            <ScoreCard
-              key={score.resumeId}
-              score={score}
-              rank={index}
-              previousRank={previousRanks[score.resumeId]}
-            />
+            <div 
+              key={score.resumeId} 
+              onClick={() => handleCardClick(score.resumeId)}
+              className="cursor-pointer transition-transform hover:scale-[1.02]"
+            >
+              <ScoreCard
+                score={score}
+                rank={index}
+                previousRank={previousRanks[score.resumeId]}
+              />
+            </div>
           ))}
         </div>
       </CardContent>

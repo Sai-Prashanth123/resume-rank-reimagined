@@ -17,6 +17,7 @@ const Index = () => {
   const { toast } = useToast();
 
   const handleResumeUpload = (uploadedResumes: Resume[]) => {
+    // Add new resumes to the existing collection
     setResumes((prev) => [...prev, ...uploadedResumes]);
     
     // If job description is already provided, analyze the new resumes
@@ -42,8 +43,14 @@ const Index = () => {
   const analyzeNewResumes = async (newResumes: Resume[], jd: JobDescription) => {
     setIsAnalyzing(true);
     try {
+      // For each new resume, analyze and add to scores
       const newScores = await analyzeResumes(newResumes, jd);
-      setResumeScores((prev) => [...prev, ...newScores]);
+      
+      // Merge new scores with existing ones and re-sort
+      setResumeScores(prev => {
+        const combined = [...prev, ...newScores];
+        return combined.sort((a, b) => b.overallScore - a.overallScore);
+      });
       
       toast({
         title: "Analysis complete",
