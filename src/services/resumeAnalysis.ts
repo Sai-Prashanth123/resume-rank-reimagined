@@ -189,9 +189,9 @@ const createFallbackResult = async (
   
   // Overall score with realistic weighting
   const overallScore = Math.round(
-    keywordMatch * 0.25 +
-    skillsMatch * 0.35 +
-    experienceMatch * 0.25 +
+    keywordMatch * 0.05 +
+    skillsMatch * 0.45 +
+    experienceMatch * 0.35 +
     educationMatch * 0.15
   );
   

@@ -5,6 +5,7 @@ import { Check, Loader, Upload, X, FolderOpen, FileText } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import { Resume } from "@/types/resume";
 import { parseResumeFile } from "@/services/resumeAnalysis";
+import { useNavigate } from "react-router-dom";
 
 interface ResumeDropzoneProps {
   onResumeUpload: (resumes: Resume[]) => void;
@@ -18,6 +19,7 @@ const ResumeDropzone: React.FC<ResumeDropzoneProps> = ({ onResumeUpload }) => {
   const [processedCount, setProcessedCount] = useState(0);
   const [processingFile, setProcessingFile] = useState<string | null>(null);
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -237,6 +239,9 @@ const ResumeDropzone: React.FC<ResumeDropzoneProps> = ({ onResumeUpload }) => {
       // Clear the uploaded files
       setUploadedFiles([]);
       setProcessingFile(null);
+
+      // Navigate to the interview-setup page
+      navigate("/interview-setup");
     } catch (error) {
       console.error("Error processing resumes:", error);
       toast({
@@ -250,7 +255,7 @@ const ResumeDropzone: React.FC<ResumeDropzoneProps> = ({ onResumeUpload }) => {
       setProcessedCount(0);
       setProcessingFile(null);
     }
-  }, [uploadedFiles, onResumeUpload, toast]);
+  }, [uploadedFiles, onResumeUpload, toast, navigate]);
 
   return (
     <Card className="shadow-lg border-resume-border">
@@ -380,7 +385,7 @@ const ResumeDropzone: React.FC<ResumeDropzoneProps> = ({ onResumeUpload }) => {
                   onClick={processFiles}
                   disabled={isUploading}
                 >
-                  Analyze {uploadedFiles.length} Resumes
+                  Next
                 </Button>
               )}
             </div>

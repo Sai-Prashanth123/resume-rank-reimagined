@@ -11,6 +11,19 @@ export interface JobDescriptionAnalysis {
   sections: AnalyzedSection[];
 }
 
+// Updated interface for complete job data
+export interface CompleteJobData {
+  title: string;
+  company: string;
+  department?: string;
+  description: string;
+  requiredExperience?: string;
+  employmentType?: string;
+  location?: string;
+  salaryRange?: string;
+  applicationDeadline?: string;
+}
+
 // Retry mechanism for API requests
 const retryRequest = async <T>(
   requestFn: () => Promise<T>, 
@@ -90,10 +103,13 @@ const extractRequirements = (description: string): string[] => {
 };
 
 // Generate a fallback analysis if the API fails
-const generateFallbackAnalysis = (description: string): JobDescriptionAnalysis => {
+const generateFallbackAnalysis = (jobData: CompleteJobData): JobDescriptionAnalysis => {
   // Extract skills and requirements using client-side logic
-  const skills = extractCommonSkills(description);
-  const extractedRequirements = extractRequirements(description);
+  const skills = extractCommonSkills(jobData.description);
+  const extractedRequirements = extractRequirements(jobData.description);
+  
+  // Use extracted requirements
+  const allRequirements = [...extractedRequirements];
   
   const sections: AnalyzedSection[] = [];
   
@@ -106,15 +122,33 @@ const generateFallbackAnalysis = (description: string): JobDescriptionAnalysis =
   }
   
   // Add extracted requirements if found
-  if (extractedRequirements.length > 0) {
+  if (allRequirements.length > 0) {
     sections.push({
       section_name: "Requirements",
-      requirements: extractedRequirements
+      requirements: allRequirements
+    });
+  }
+  
+  // Add job details section
+  const jobDetails: string[] = [];
+  if (jobData.title) jobDetails.push(`Title: ${jobData.title}`);
+  if (jobData.company) jobDetails.push(`Company: ${jobData.company}`);
+  if (jobData.department) jobDetails.push(`Department: ${jobData.department}`);
+  if (jobData.requiredExperience) jobDetails.push(`Required Experience: ${jobData.requiredExperience}`);
+  if (jobData.employmentType) jobDetails.push(`Employment Type: ${jobData.employmentType}`);
+  if (jobData.location) jobDetails.push(`Location: ${jobData.location}`);
+  if (jobData.salaryRange) jobDetails.push(`Salary Range: ${jobData.salaryRange}`);
+  if (jobData.applicationDeadline) jobDetails.push(`Application Deadline: ${jobData.applicationDeadline}`);
+  
+  if (jobDetails.length > 0) {
+    sections.push({
+      section_name: "Job Details",
+      requirements: jobDetails
     });
   }
   
   // Add default sections if we couldn't extract enough information
-  if (sections.length === 0 || extractedRequirements.length === 0) {
+  if (sections.length === 0 || allRequirements.length === 0) {
     sections.push({
       section_name: "Work Experience",
       requirements: [
@@ -154,13 +188,11 @@ const generateFallbackAnalysis = (description: string): JobDescriptionAnalysis =
   return { sections };
 };
 
-export const analyzeJobDescription = async (description: string): Promise<JobDescriptionAnalysis> => {
+export const analyzeJobDescription = async (jobData: CompleteJobData): Promise<JobDescriptionAnalysis> => {
   try {
     // Use retry mechanism for resilience
     const response = await retryRequest(() => 
-      axios.post(`${API_BASE_URL}/analyze-job-description`, {
-        description
-      }, {
+      axios.post(`${API_BASE_URL}/analyze-job-description`, jobData, {
         timeout: 30000, // 30 seconds timeout
       })
     );
@@ -172,7 +204,7 @@ export const analyzeJobDescription = async (description: string): Promise<JobDes
     // Check if it's a connection error (API not running)
     if (error.code === 'ERR_NETWORK') {
       // Generate a more helpful fallback with client-side analysis
-      const fallbackAnalysis = generateFallbackAnalysis(description);
+      const fallbackAnalysis = generateFallbackAnalysis(jobData);
       
       // Add API connection error message
       fallbackAnalysis.sections.unshift({
@@ -190,6 +222,6 @@ export const analyzeJobDescription = async (description: string): Promise<JobDes
     }
     
     // Return a fallback analysis with an error message
-    return generateFallbackAnalysis(description);
+    return generateFallbackAnalysis(jobData);
   }
 }; 

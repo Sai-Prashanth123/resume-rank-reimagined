@@ -50,7 +50,17 @@ except:
 
 # Data Models
 class JobDescriptionRequest(BaseModel):
+    title: str
+    company: str  
+    department: Optional[str] = None
     description: str
+    requiredExperience: Optional[str] = None
+    employmentType: Optional[str] = None
+    location: Optional[str] = None
+    salaryRange: Optional[str] = None
+    applicationDeadline: Optional[str] = None
+    jobRequirements: Optional[str] = None
+    jobResponsibilities: Optional[str] = None
 
 class AnalyzedSection(BaseModel):
     section_name: str
@@ -419,83 +429,140 @@ def calculate_education_match(resume_text, job_requirements):
 
 @app.post("/analyze-job-description", response_model=JobDescriptionAnalysis)
 async def analyze_job_description(request: JobDescriptionRequest = Body(...)):
+    """
+    Analyze a job description and extract sections, requirements, and skills.
+    Now includes analysis of all job fields, not just the description.
+    """
     try:
-        # Call Azure OpenAI API to analyze the job description
+        # Combine all fields into a comprehensive prompt
+        all_fields_text = f"""
+        Job Title: {request.title}
+        Company: {request.company}
+        """
+        
+        if request.department:
+            all_fields_text += f"Department: {request.department}\n"
+        
+        all_fields_text += f"\nJob Description:\n{request.description}\n"
+        
+        if request.requiredExperience:
+            all_fields_text += f"\nRequired Experience: {request.requiredExperience}\n"
+            
+        if request.employmentType:
+            all_fields_text += f"Employment Type: {request.employmentType}\n"
+            
+        if request.location:
+            all_fields_text += f"Location: {request.location}\n"
+            
+        if request.salaryRange:
+            all_fields_text += f"Salary Range: {request.salaryRange}\n"
+            
+        if request.applicationDeadline:
+            all_fields_text += f"Application Deadline: {request.applicationDeadline}\n"
+        
+        if request.jobRequirements:
+            all_fields_text += f"\nJob Requirements:\n{request.jobRequirements}\n"
+            
+        if request.jobResponsibilities:
+            all_fields_text += f"\nJob Responsibilities:\n{request.jobResponsibilities}\n"
+        
+        # Send the comprehensive job data for analysis
         response = client.chat.completions.create(
             model=deployment_name,
             messages=[
-                {"role": "system", "content": """You are a job description analyzer. 
-                Extract key requirements from the job description and categorize them into sections.
-                Always include these standard sections if relevant information is found:
-                - Technical Skills
-                - Work Experience
-                - Education
-                - Projects/Achievements
-                - Soft Skills
-                - Certifications
+                {"role": "system", "content": """
+                You are an AI assistant specialized in analyzing job descriptions.
+                Your task is to extract key sections, requirements, and skills from a job description.
+                Parse all fields provided including job title, company, department, experience, employment type, 
+                location, salary, requirements, and responsibilities.
                 
-                For each section, extract specific requirements as bullet points.
-                """
-                },
-                {"role": "user", "content": f"Analyze this job description and extract key requirements by section:\n\n{request.description}"}
+                Organize the content into relevant sections such as:
+                1. Technical Skills
+                2. Soft Skills
+                3. Experience Requirements
+                4. Education Requirements
+                5. Job Responsibilities
+                6. Company Information
+                7. Compensation & Benefits
+                8. Job Details
+                
+                For each section, provide a list of clear, concise points.
+                """},
+                {"role": "user", "content": all_fields_text}
             ],
-            temperature=0.5,
-            max_tokens=800
+            temperature=0.3,
+            max_tokens=1500
         )
         
-        content = response.choices[0].message.content
+        analysis_text = response.choices[0].message.content.strip()
         
-        # Parse the API response
+        # Parse the analysis text into sections
         sections = []
         current_section = None
         current_requirements = []
         
-        for line in content.split('\n'):
-            line = line.strip()
-            if not line:
-                continue
-                
+        for line in analysis_text.split('\n'):
+            stripped_line = line.strip()
+            
             # Check if this is a section header
-            if line.endswith(':') or any(line.startswith(s) for s in ['#', '**']) or line.isupper():
-                # Save the previous section if it exists
+            if (stripped_line and 
+                (stripped_line.endswith(':') or 
+                 any(stripped_line.startswith(prefix) for prefix in ['#', '##', '**']) or
+                 stripped_line.isupper())):
+                
+                # Save previous section if it exists
                 if current_section and current_requirements:
                     sections.append({
                         "section_name": current_section,
                         "requirements": current_requirements
                     })
-                
-                # Start a new section
-                current_section = line.rstrip(':').replace('**', '').replace('#', '').strip()
+                    
+                # Start new section
+                current_section = stripped_line.rstrip(':').replace('#', '').replace('*', '').strip()
                 current_requirements = []
-            elif line.startswith('-') or line.startswith('*') or (len(line) > 2 and line[0].isdigit() and line[1] == '.'):
-                # This is a bullet point
-                requirement = line.lstrip('-*0123456789. ').strip()
-                if requirement:
+                
+            # Check if this is a requirement (bullet point)
+            elif stripped_line.startswith(('-', '•', '*', '>', '·')) and stripped_line[1:].strip():
+                requirement = stripped_line[1:].strip()
+                if requirement and current_section:
                     current_requirements.append(requirement)
-            elif current_section and not line.startswith(('##', '**')):
-                # This might be a continuation or a non-bulleted requirement
-                current_requirements.append(line)
+                    
+            # Check if this might be a numbered requirement
+            elif re.match(r'^\d+[\.\)]', stripped_line) and stripped_line[2:].strip():
+                requirement = re.sub(r'^\d+[\.\)]', '', stripped_line).strip()
+                if requirement and current_section:
+                    current_requirements.append(requirement)
         
-        # Add the last section
+        # Add the last section if it exists
         if current_section and current_requirements:
             sections.append({
                 "section_name": current_section,
                 "requirements": current_requirements
             })
             
-        # If no sections were properly identified, create a generic one
+        # If no sections were found, try a different approach to parse the text
         if not sections:
-            # Extract lines that look like requirements
-            all_requirements = [line.strip() for line in content.split('\n') if line.strip()]
-            sections.append({
-                "section_name": "Requirements",
-                "requirements": all_requirements
-            })
+            # Simple alternative parsing approach
+            current_section = "General Requirements"
+            current_requirements = []
             
+            for line in analysis_text.split('\n'):
+                stripped_line = line.strip()
+                if stripped_line and len(stripped_line) > 10 and not stripped_line.isupper():
+                    current_requirements.append(stripped_line)
+            
+            if current_requirements:
+                sections.append({
+                    "section_name": current_section,
+                    "requirements": current_requirements
+                })
+        
+        # Return the analysis
         return {"sections": sections}
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error analyzing job description: {str(e)}")
+        print(f"Error analyzing job description: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/analyze-resumes", response_model=List[ResumeScore])
 async def analyze_resumes(request: ResumeAnalysisRequest = Body(...)):
@@ -563,9 +630,9 @@ async def analyze_resumes(request: ResumeAnalysisRequest = Body(...)):
             
             # Calculate overall score (weighted average)
             overall_score = int(
-                keyword_score * 0.25 +
-                skills_score * 0.35 +
-                experience_score * 0.25 +
+                keyword_score * 0.05 +
+                skills_score * 0.45 +
+                experience_score * 0.35 +
                 education_score * 0.15
             )
             

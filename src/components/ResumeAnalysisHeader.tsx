@@ -1,6 +1,6 @@
-
 import React from "react";
 import { JobDescription } from "@/types/resume";
+import ScoringWeightsInfo from "./ScoringWeightsInfo";
 
 interface ResumeAnalysisHeaderProps {
   jobDescription: JobDescription;
@@ -14,7 +14,7 @@ const ResumeAnalysisHeader: React.FC<ResumeAnalysisHeaderProps> = ({
   return (
     <div className="mb-8 animate-fade-in">
       <h1 className="text-3xl font-bold text-resume-text mb-2">
-        Resume Analysis Results
+        Resume Analysis
       </h1>
       <div className="bg-resume-background border border-resume-border rounded-lg p-4">
         <div className="flex flex-col md:flex-row justify-between">
@@ -85,6 +85,11 @@ const ResumeAnalysisHeader: React.FC<ResumeAnalysisHeaderProps> = ({
             </p>
           </div>
         </div>
+      </div>
+      
+      {/* Scoring Weights Info */}
+      <div className="mt-4">
+        <ScoringWeightsInfo />
       </div>
     </div>
   );

@@ -88,26 +88,19 @@ const Index = () => {
 
   return (
     <div className="min-h-screen bg-resume-background/50">
-      <div className="container mx-auto py-8 px-4 md:px-6">
-        <header className="mb-8 text-center">
-          <h1 className="text-4xl font-bold text-resume-text mb-4">
-            Resume Rank
-          </h1>
-          <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            Evaluate and rank resumes against job descriptions using our advanced ATS scoring system
-          </p>
-        </header>
+      <div className="w-full py-4 px-4 md:px-6">
+        <h2 className="text-2xl font-bold text-resume-text mb-6">New Job Post</h2>
 
         {/* Step 1: Job Description Input (Always visible in step 1) */}
         {appStage === 'job-description' && (
-          <div className="max-w-2xl mx-auto">
+          <div className="w-full">
             <JobDescriptionInput onJobDescriptionSave={handleJobDescriptionSave} />
           </div>
         )}
 
         {/* Step 2: Resume Upload (Only visible after job description is analyzed) */}
         {appStage === 'upload-resumes' && jobDescription && (
-          <div className="max-w-2xl mx-auto">
+          <div className="w-full">
             <div className="mb-6">
               <h2 className="text-xl font-semibold text-resume-text mb-2">Job Description Summary</h2>
               <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
@@ -133,7 +126,7 @@ const Index = () => {
 
         {/* Step 3: Analysis Results (Only visible after resumes are uploaded and analyzed) */}
         {appStage === 'analysis' && jobDescription && (
-          <div>
+          <div className="w-full">
             <ResumeAnalysisHeader 
               jobDescription={jobDescription}
               resumeCount={resumes.length}

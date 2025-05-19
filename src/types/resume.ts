@@ -42,11 +42,16 @@ export interface JobDescription {
   id: string;
   title: string;
   company: string;
+  department?: string;
   description: string;
   skills: string[];
   requirements: string[];
+  responsibilities?: string[];
   location?: string;
   salary?: string;
+  experienceRequired?: string;
+  employmentType?: string;
+  applicationDeadline?: Date;
   postDate?: Date;
   contactInfo?: string;
   preprocessed?: boolean;

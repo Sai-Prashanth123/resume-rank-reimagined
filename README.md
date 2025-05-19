@@ -2,11 +2,7 @@
 
 This application helps you to analyze job descriptions and match resumes against them.
 
-## Features
-
-- Job description analysis using GPT-4o API
-- Automatic extraction of job requirements and skills
-- Resume matching against analyzed job descriptions
+## Features- Job description analysis using GPT-4o API- Automatic extraction of job requirements and skills- Resume shortlisting criteria generation- Resume matching against analyzed job descriptions
 
 ## Setup
 
